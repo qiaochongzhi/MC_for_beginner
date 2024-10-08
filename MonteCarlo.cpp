@@ -10,8 +10,6 @@
 
 #define RandNumber() ( rand() / double( RAND_MAX ) )
 #define INFINT 1.e10
-#define TRUE 1
-#define FALSE 0
 
 namespace py = pybind11;
 
@@ -89,6 +87,8 @@ int MonteCarlo::calculateInteraction(const std::vector<double>& p1, const std::v
 
     double sr2, sr6, sr12;
 
+    pot = 0.0;
+    vir = 0.0;
     for ( int i = 0; i < dim; i++ )
     {
         dr = p1[i] - p2[i];
@@ -228,8 +228,10 @@ py::object MonteCarlo::displacementParticles( double drMax )
 
             if ( metropolis( delta ) )
             {
-                totalVirial    = virT - virT0;
-                totalPotential = potT - potT0;
+                for ( int j = 0; j < dim; j++ )
+                    position[i][j] = pos[j];
+                totalVirial    += ( virT - virT0 );
+                totalPotential += ( potT - potT0 );
                 moves += 1;
             }
         }
@@ -242,21 +244,21 @@ py::object MonteCarlo::displacementParticles( double drMax )
     return result;
 }
 
-int MonteCarlo::metropolis( double delta )
+bool MonteCarlo::metropolis( double delta )
 {
     double trial = 0;
     double exponent_guard = 75.0;
 
     if ( delta > exponent_guard )
-        return FALSE;
-    else if ( delta < 0.9 )
-        return TRUE;
+        return false;
+    else if ( delta < 0.0 )
+        return true;
 
     trial = RandNumber();
     if ( exp( -delta ) > trial )
-        return TRUE;
+        return true;
     else
-        return FALSE;
+        return false;
 }
 
 double MonteCarlo::testParticles()

@@ -30,5 +30,5 @@ class MonteCarlo
     int calculateInteraction( const std::vector<double>& p1, const std::vector<double>& p2, double& pot, double& vir );
     int calculateTotalPotential( double& pot, double& vir );
 
-    int metropolis( double delta );
+    bool metropolis( double delta );
 };
