@@ -1,36 +1,111 @@
-#include <vector>
-#include <iostream>
-#include <math.h>
-#include <stdlib.h>
-
 #include "MonteCarlo.h"
-
-#include <pybind11/pybind11.h>
-#include <pybind11/numpy.h>
 
 #define RandNumber() ( rand() / double( RAND_MAX ) )
 #define INFINT 1.e10
 
-namespace py = pybind11;
-
-MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut)
+MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbourList)
 {
     this->numberOfParticles = num;
     this->dim               = dim;
     this->temperature       = t;
     this->rCut              = rCut;
+    this->isNeighbourList   = isNeighbourList;
 
     position.resize(num);
 
-    for ( int i = 0; i < num; i++ )
+    for ( size_t i = 0; i < num; i++ )
         position[i].resize(dim);
 }
 
 void MonteCarlo::SetBox( const py::array_t<float>& box )
 {
     auto r = box.unchecked<1>();
-    for ( int i = 0; i < dim; i++ )
+    for ( size_t i = 0; i < dim; i++ )
         this->box[i] = r(i);
+
+    if ( isNeighbourList )
+        neighbourList.initList(numberOfParticles, rCut/this->box[0]);
+}
+
+void MonteCarlo::SetBox( const std::vector<double>& box )
+{
+    for ( size_t i = 0; i < dim; i++ )
+        this->box[i] = box[i];
+
+    if ( isNeighbourList )
+        neighbourList.initList(numberOfParticles, rCut/this->box[0]);
+}
+
+void MonteCarlo::InitPosition()
+{
+    double volume  = double( box[0] * box[1] * box[2] );
+    double density = std::pow( double( numberOfParticles / volume), 1.0/3.0 );
+    std::vector<int> cells(dim, 0);
+
+    // Define a small constant epsilon to avoid floating-point precision issues
+    const double epsilon = 1e-10;
+    for ( size_t i = 0; i < dim; i++ )
+        cells[i] = static_cast<int>( std::ceil(density*box[i] - epsilon) );
+        // Calculate the number of grid cells in each dimension:
+        // 1. density * box[i]: Compute the theoretical number of grid cells based on density and box size.
+        // 2. Subtract epsilon: Avoid errors caused by floating-point precision when using std::ceil.
+        // 3. std::ceil: Round up to ensure the grid cells fully cover the box.
+        // 4. static_cast<int>: Convert the result to an integer type and store it in cells[i].
+
+    const std::array<double, 3> gap = {
+        1.0 / cells[0],
+        1.0 / cells[1],
+        1.0 / cells[2]
+    };
+
+    // print value of cells
+    std::cout << "cells: " << cells[0] << " " << cells[1] << " " << cells[2] << std::endl;
+
+    int n = 0; // index of particles
+    bool breakFlag = false;
+
+    for (size_t i = 0; i < cells[0] && !breakFlag; ++i)
+    {
+        for (size_t j = 0; j < cells[1] && !breakFlag; ++j)
+        {
+            for (size_t k = 0; k < cells[2] && !breakFlag; ++k)
+            {
+                if (n >= numberOfParticles)
+                {
+                    breakFlag = true;
+                    break;
+                }
+
+                // calculate the position of the particle ([-0.5, 0.5])
+                position[n] = {
+                    (i + 0.5) * gap[0] - 0.5,
+                    (j + 0.5) * gap[1] - 0.5,
+                    (k + 0.5) * gap[2] - 0.5
+                };
+
+                ++n; // move to the next particle
+            }
+        }
+    }
+
+    if ( isNeighbourList )
+    {
+        neighbourList.makeList(this->position);
+    }
+
+    // std::cout << "rCut/box = " << rCut/this->box[0] << std::endl;
+
+    // Test the position
+    /*
+    for ( int i = 0; i < numberOfParticles; i++ )
+    {
+        for ( int j = 0; j < dim; j++ )
+        {
+            std::cout << this->position[i][j] << " ";
+        }
+        std::cout << std::endl;
+    }
+    */
 
 }
 
@@ -40,6 +115,9 @@ void MonteCarlo::SetPosition(const py::array_t<float>& position)
     for ( py::size_t i = 0; i < r.shape(0); i++)
         for ( py::size_t j = 0; j < r.shape(1); j++)
             this->position[i][j] = r(i, j);
+
+    if ( isNeighbourList )
+        neighbourList.makeList(this->position);
 
     // Test the position
     /*
@@ -71,25 +149,24 @@ py::array_t<float> MonteCarlo::GetPosition()
     auto r    = py::array_t<float>(shape);
     auto view = r.mutable_unchecked<2>();
 
-    for (int i = 0; i < numberOfParticles; i++)
-        for ( int j = 0; j < dim; j++ )
+    for (size_t i = 0; i < numberOfParticles; i++)
+        for ( size_t j = 0; j < dim; j++ )
             view(i, j) = this->position[i][j];
 
     return r;
 }
 
-int MonteCarlo::calculateInteraction(const std::vector<double>& p1, const std::vector<double>& p2, double& pot, double& vir)
+PotentialType MonteCarlo::calculateInteraction(const std::vector<double>& p1, const std::vector<double>& p2)
 {
-    int overlap  = 0;
+
     double r     = 0.0;
     double dr    = 0.0;
     double rCut2 = rCut * rCut;
 
     double sr2, sr6, sr12;
 
-    pot = 0.0;
-    vir = 0.0;
-    for ( int i = 0; i < dim; i++ )
+    PotentialType partial; // Partial potential and virial.
+    for ( size_t i = 0; i < dim; i++ )
     {
         dr = p1[i] - p2[i];
         dr = dr - round( dr ); // Periodic boundary condition.
@@ -100,8 +177,8 @@ int MonteCarlo::calculateInteraction(const std::vector<double>& p1, const std::v
     sr2 = 1. / r;
     if ( sr2 > sr2Over )
     {
-        overlap = 1;
-        return overlap;
+        partial.overlap = true;
+        return partial;
     }
 
     if ( r < rCut2 )
@@ -109,136 +186,182 @@ int MonteCarlo::calculateInteraction(const std::vector<double>& p1, const std::v
         sr6  = pow( sr2, 3 );
         sr12 = sr6 * sr6;
 
-        pot  = sr12 - sr6;
-        vir  = pot + sr12;
+        partial.pot = sr12 - sr6;
+        partial.vir = partial.pot + sr12;
 
-        pot  = pot * 4.0;
-        vir  = vir * 24.0 / 3.0;
+        partial.pot = partial.pot * 4.0;
+        partial.vir = partial.vir * 24.0 / 3.0;
     }
 
-    return overlap;
+    return partial;
 }
 
-int MonteCarlo::calculateTotalPotential( double& pot, double& vir )
+PotentialType MonteCarlo::calculateTotalPotential()
 {
-    double pot1 = 0.0;
-    double vir1 = 0.0;
-    int overlap = 0;
+    PotentialType partial;
 
-    pot = 0.0;
-    vir = 0.0;
-    for ( int i = 0; i < numberOfParticles; i++ )
+    if (isNeighbourList)
     {
-        for ( int j = i + 1; j < numberOfParticles; j++ )
+        for (size_t i = 0; i < numberOfParticles; i++)
         {
-            overlap = calculateInteraction( position[i], position[j], pot1, vir1 );
-            if ( overlap )
-                return overlap;
-
-            pot = pot + pot1;
-            vir = vir + vir1;
+            std::vector<int> ci = neighbourList.c_index(position[i]);
+            std::vector<int> neighbor = neighbourList.getNeighbor(i, ci, true);
+            for (auto j : neighbor)
+            {
+                if ( i == j ) continue; // Skip self.
+                partial += calculateInteraction( position[i], position[j] );
+                if ( partial.overlap )
+                    return partial;
+            }
         }
     }
-    return overlap;
+    else
+    {
+        for ( size_t i = 0; i < numberOfParticles; i++ )
+        {
+            for ( size_t j = i + 1; j < numberOfParticles; j++ )
+            {
+                partial += calculateInteraction( position[i], position[j] );
+                if ( partial.overlap )
+                    return partial;
+            }
+        }
+    }
+    return partial;
 }
 
 py::object MonteCarlo::GetPotential()
 {
-    double pot = 0.0;
-    double vir = 0.0;
-    int overlap;
+    PotentialType partial;
     auto potential = py::dict();
 
-    overlap = calculateTotalPotential( pot, vir );
+    partial = calculateTotalPotential();
 
-    potential["pot"] = pot;
-    potential["vir"] = vir;
-    potential["overlap"] = overlap;
-
-    //std::cout << "pot = " << pot << std::endl;
-    //std::cout << "vir = " << vir << std::endl;
+    potential["pot"] = partial.pot;
+    potential["vir"] = partial.vir;
+    potential["overlap"] = partial.overlap;
 
     return potential;
 }
 
-py::object MonteCarlo::displacementParticles( double drMax )
+py::object MonteCarlo::MoveParticles( const double drMax )
 {
-    auto result = py::dict();
+    auto potential = py::dict();
+    auto pot = displacementParticles( drMax );
+
+    potential["pot"] = pot["pot"];
+    potential["vir"] = pot["vir"];
+    potential["moves"] = pot["moves"];
+
+    return potential;
+}
+
+std::map<std::string, double> MonteCarlo::displacementParticles( double drMax )
+{
+    std::map<std::string, double> result;
     int move = 0;
 
     std::vector<double> pos(3, 0);
     std::vector<double> poso(3, 0);
 
-    double totalPotential = 0.0;
-    double totalVirial    = 0.0;
-
+    PotentialType total; // total potential
     double delta;
 
     int moves = 0;
-    for ( int i = 0; i < numberOfParticles; i++ )
+    for ( size_t i = 0; i < numberOfParticles; i++ )
     {
-        int overlap   = 0;
-        int overlap0  = 0;
-
-        double potT  = 0.0;
-        double virT  = 0.0;
-
-        double potT0 = 0.0;
-        double virT0 = 0.0;
         for ( int j = 0; j < dim; j++ )
         {
             pos[j]  = position[i][j] + ( 2*RandNumber() - 1 ) * drMax;
             poso[j] = position[i][j];
 
-            pos[j] = pos[j] - round( pos[j] ); // PBC
+            pos[j] = pos[j] - round( pos[j] ); // pbc
         }
 
-        double vir  = 0.0;
-        double vir0 = 0.0;
-        double pot  = 0.0;
-        double pot0 = 0.0;
-        for ( int k = 0; k < numberOfParticles; k++ )
-        {
-            if ( i == k ) continue;
-            overlap  = calculateInteraction( pos,  position[k], pot,  vir );
-            overlap0 = calculateInteraction( poso, position[k], pot0, vir0 );
+        PotentialType partial0, partial1;
 
-            if ( overlap0 )
+        if (isNeighbourList)
+        {
+            std::vector<int> ci = neighbourList.c_index(position[i]);
+            std::vector<int> neighbor = neighbourList.getNeighbor(i, ci, false);
+
+            // calculate potential and virial for old position
+            for ( auto k : neighbor )
             {
-                std::cout << "Error: overlap, displacement particles." << std::endl;
-                exit(-1);
+                if ( i == k ) continue;
+                partial0 += calculateInteraction( poso,  position[k] );
+                if ( partial0.overlap )
+                {
+                    std::cout << "Error: overlap, displacement particles." << std::endl;
+                    exit(-1);
+                }
             }
 
-            if ( overlap )
-                break;
-            else
-            {
-                potT  = potT  + pot;
-                potT0 = potT0 + pot0;
+            // calculate potential and virial for new position
+            ci = neighbourList.c_index(pos);
+            neighbourList.moveInList( i, ci );
+            neighbor = neighbourList.getNeighbor(i, ci, false);
 
-                virT  = virT  + vir;
-                virT0 = virT0 + vir0;
+            for ( auto k : neighbor )
+            {
+                if ( i == k ) continue;
+                partial1 += calculateInteraction( pos,  position[k] );
+                if ( partial1.overlap )
+                    break;
+            }
+        }
+        else
+        {
+            for ( size_t k = 0; k < numberOfParticles; k++ )
+            {
+                if ( i == k ) continue;
+                partial1 += calculateInteraction( pos,  position[k] );
+                partial0 += calculateInteraction( poso, position[k] );
+
+                if ( partial0.overlap )
+                {
+                    std::cout << "Error: overlap, displacement particles." << std::endl;
+                    exit(-1);
+                }
+
+                if ( partial1.overlap )
+                    break;
             }
         }
 
-        if ( !overlap )
+        if ( !(partial1.overlap) )
         {
-            delta = potT - potT0;
+            delta = partial1.pot - partial0.pot;
             delta = delta / temperature;
 
             if ( metropolis( delta ) )
             {
-                for ( int j = 0; j < dim; j++ )
+                for ( size_t j = 0; j < dim; j++ )
                     position[i][j] = pos[j];
-                totalVirial    += ( virT - virT0 );
-                totalPotential += ( potT - potT0 );
+                total += ( partial1- partial0 );
                 moves += 1;
             }
+            else if(isNeighbourList)
+            {
+                // move the ith particle back to its original position
+                auto ci = neighbourList.c_index(position[i]);
+                neighbourList.moveInList(i, ci);
+            }
+        }
+        else
+        {
+            if ( isNeighbourList ) 
+            {
+                // move the ith particle back to its original position
+                auto ci = neighbourList.c_index(position[i]);
+                neighbourList.moveInList(i, ci);
+            }
+
         }
     }
 
-    result["pot"]   = totalPotential;
-    result["vir"]   = totalVirial;
+    result["pot"]   = total.pot;
+    result["vir"]   = total.vir;
     result["moves"] = moves;
 
     return result;
@@ -246,7 +369,7 @@ py::object MonteCarlo::displacementParticles( double drMax )
 
 bool MonteCarlo::metropolis( double delta )
 {
-    double trial = 0;
+    double trial = 0.0;
     double exponent_guard = 75.0;
 
     if ( delta > exponent_guard )
@@ -263,23 +386,79 @@ bool MonteCarlo::metropolis( double delta )
 
 double MonteCarlo::testParticles()
 {
-    double overlap  = 0;
-    double potTotal = 0.0;
-    double vir      = 0.0;
-    double pot      = 0.0;
+    PotentialType partial;
 
     std::vector<double> pos(3,0);
-    for ( int j = 0; j < dim; j++ )
+    for ( size_t j = 0; j < dim; j++ )
         pos[j] = RandNumber() - 0.5;
 
-    for ( int i = 0; i < numberOfParticles; i++)
+    for ( size_t i = 0; i < numberOfParticles; i++)
     {
-        overlap = calculateInteraction( pos, position[i], pot, vir);
-        if ( overlap )
+        partial += calculateInteraction( pos, position[i] );
+        if ( partial.overlap )
             return INFINT;
-
-        potTotal = potTotal + pot;
     }
 
-    return potTotal;
+    return partial.pot;
+}
+
+//py::array_t<float> MonteCarlo::NVTrun( int nStep, double drMax )
+std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double drMax )
+{
+
+    std::map<std::string, std::vector<double>> pot;
+    pot.insert(std::pair<std::string, std::vector<double>>("potential",  std::vector<double>(nStep, 0)));
+    pot.insert(std::pair<std::string, std::vector<double>>("vir",        std::vector<double>(nStep, 0)));
+    pot.insert(std::pair<std::string, std::vector<double>>("moveRatios", std::vector<double>(nStep, 0)));
+
+    PotentialType partial = calculateTotalPotential();
+
+    for (size_t i = 0; i < nStep; i++)
+    {
+        auto results = displacementParticles(drMax);
+        if (i%1000==0)
+           std::cout << i << std::endl;
+
+        // double pot1 = testParticles();
+        // pot1 = exp( - pot1 / temperature );
+
+        double moveRatio = results["moves"] / numberOfParticles;
+        if (moveRatio > 0.55)
+            drMax *= 1.05;
+        else if (moveRatio < 0.45)
+            drMax *= 0.95;
+
+        pot["moveRatios"][i] = moveRatio;
+
+        if ( i == 0)
+        {
+            pot["vir"][i]       = partial.vir + results["vir"];
+            pot["potential"][i] = partial.pot + results["pot"];
+        }
+        else
+        {
+            pot["vir"][i]       = pot["vir"][i-1]       + results["vir"];
+            pot["potential"][i] = pot["potential"][i-1] + results["pot"];
+        }
+    }
+
+    return pot;
+
+    /*
+    int shape[2]{nStep, 3};
+    auto r    = py::array_t<float>(shape);
+    auto view = r.mutable_unchecked<2>();
+
+    int n = 0;
+    for ( auto x : pot )
+    {
+        int m = 0;
+        for ( auto y : x.second )
+            view(n, m++) = y;
+
+        n++;
+    }
+
+    return r;
+    */
 }
