@@ -10,6 +10,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdlib.h>
+#include <fstream>
 
 #include "linkList.h"
 #include "PotentialType.h"
@@ -36,7 +37,7 @@ class MonteCarlo
     double testParticles();
 
     //py::array_t<float> NVTrun( int nStep, double drMax );
-    std::map<std::string, std::vector<double>> NVTrun( int nStep, double drMax );
+    std::map<std::string, std::vector<double>> NVTrun( int nStep, double drMax, int interval = 100 );
 
     private:
     int numberOfParticles;
@@ -55,6 +56,7 @@ class MonteCarlo
     PotentialType calculateTotalPotential();
 
     bool metropolis( double delta );
+    void writeXYZTrajectory(const std::string& filename, int timestep, bool append = true);
 
 };
 

@@ -253,7 +253,7 @@ class MonteCarlo():
 
         return pressures, moveRatios, total, pots, poss
 
-    def MC_NVT_CPP( self, nBlock=10, nStep=1000 ):
+    def MC_NVT_CPP( self, nBlock=10, nStep=1000, interval = 20 ):
 
         # Initialize energy and check particle positions
         self.mc.InitPosition()
@@ -264,7 +264,7 @@ class MonteCarlo():
 
         steps = int( nBlock * nStep )
 
-        results = self.mc.MCrun(steps, self.drMax)
+        results = self.mc.MCrun(steps, self.drMax, interval)
 
         totalEnergy = results["potential"] + self.Ulrc * self.num
         pressures   = self.rho * self.temperature + results["vir"] / self.vol + self.pressureLrc
@@ -319,7 +319,7 @@ class MonteCarlo():
         return pressures, moveRatios, totalEnergy, pots, pots
 
     @staticmethod
-    def rdf( pos, box, n, dr = 0.02 ):
+    def rdf( pos, box, n, dr = 0.02, totalStep = 1000 ):
         """
         Calculate the radius distribution function
         Box must be a cube, in this version
@@ -336,7 +336,7 @@ class MonteCarlo():
 
 
         while True:
-            if (nStep >= 1000) or (nStep >= len(pos)):
+            if (nStep >= totalStep) or (nStep >= len(pos)):
                 break
 
             r = np.array( pos[nStep] )
@@ -370,6 +370,37 @@ class MonteCarlo():
         4 5 1 2 3 (1, 4) (1, 3)
         """
         return rMid, g
+
+    @staticmethod
+    def readXYZTrajectory( filename ):
+        """
+        Read XYZ trajectory file
+        """
+
+        frames = []
+        with open(filename, "r") as f:
+            while True:
+                numAtomsLine = f.readline()
+                if not numAtomsLine:
+                    break
+
+                numAtoms = int(numAtomsLine.strip())
+                commentLine = f.readline()
+
+                currentFrame = []
+                for _ in range(numAtoms):
+                    atomLine = f.readline()
+                    atomData = atomLine.split()
+                    if not atomData:
+                        raise ValueError("Unexpected end of file while reading atom data.")
+                    x, y, z = map(float, atomData[-3:])
+                    currentFrame.append([x, y, z])
+
+                currentFrame = np.array(currentFrame)
+
+                frames.append(currentFrame)
+
+        return np.array(frames)
 
 if __name__ == "__main__":
 

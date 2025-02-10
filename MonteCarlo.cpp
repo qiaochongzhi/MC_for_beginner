@@ -403,7 +403,7 @@ double MonteCarlo::testParticles()
 }
 
 //py::array_t<float> MonteCarlo::NVTrun( int nStep, double drMax )
-std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double drMax )
+std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double drMax, int interval )
 {
 
     std::map<std::string, std::vector<double>> pot;
@@ -440,6 +440,15 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
             pot["vir"][i]       = pot["vir"][i-1]       + results["vir"];
             pot["potential"][i] = pot["potential"][i-1] + results["pot"];
         }
+
+        if (i%interval == 0)
+        {
+            if ( i == 0)
+                writeXYZTrajectory("trajectory.xyz", i, false);
+            else
+               writeXYZTrajectory("trajectory.xyz", i, true);
+        }
+
     }
 
     return pot;
@@ -461,4 +470,28 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
 
     return r;
     */
+}
+
+void MonteCarlo::writeXYZTrajectory( const std::string& filename, int timestep,bool append )
+{
+    std::ofstream file;
+    if (append)
+        file.open(filename, std::ios_base::app);
+    else
+        file.open(filename);
+
+    if ( !file.is_open() )
+        throw std::runtime_error("Could not open file " + filename);
+
+    file << numberOfParticles << "\n";
+    file << "Step " << timestep << "\n";
+
+    for ( auto& p : position )
+    {
+        file << "Ar " << " ";
+        for ( auto& x : p )
+            file << x << " ";
+        file << "\n";
+    }
+    file.close();
 }
