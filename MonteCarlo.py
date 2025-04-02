@@ -68,6 +68,12 @@ class MonteCarlo():
             self.mc = MC.MonteCarlo( self.num, dim, self.temperature, self.rCut, self.isNeighborList)
             (self.mc).SetBox( self.box )
 
+            # Set the trajectory filename
+            if ("Filename" in system):
+                (self.mc).SetFileName( system["Filename"] )
+
+
+
     @staticmethod
     def initCoords(pos, cells):
         """

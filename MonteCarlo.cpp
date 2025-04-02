@@ -1,6 +1,6 @@
 #include "MonteCarlo.h"
 
-#define RandNumber() ( rand() / double( RAND_MAX ) )
+//#define RandNumber() ( rand() / double( RAND_MAX ) )
 #define INFINT 1.e10
 
 MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbourList)
@@ -15,6 +15,20 @@ MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbour
 
     for ( size_t i = 0; i < num; i++ )
         position[i].resize(dim);
+
+    gen = std::mt19937(std::random_device{}()); // init the random seed
+    dist = std::uniform_real_distribution<double>(0.0, 1.0);
+
+}
+
+void MonteCarlo::setFileName(std::string s)
+{
+    filename = s;
+}
+
+double MonteCarlo::RandNumber()
+{
+    return dist(gen);
 }
 
 void MonteCarlo::SetBox( const py::array_t<float>& box )
@@ -441,12 +455,13 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
             pot["potential"][i] = pot["potential"][i-1] + results["pot"];
         }
 
+        // write trajectory to XYZ file
         if (i%interval == 0)
         {
             if ( i == 0)
-                writeXYZTrajectory("trajectory.xyz", i, false);
+                writeXYZTrajectory(filename, i, false);
             else
-               writeXYZTrajectory("trajectory.xyz", i, true);
+               writeXYZTrajectory(filename, i, true);
         }
 
     }

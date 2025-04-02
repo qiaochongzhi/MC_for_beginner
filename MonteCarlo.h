@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <fstream>
 
+#include <random>
+
 #include "linkList.h"
 #include "PotentialType.h"
 
@@ -36,8 +38,12 @@ class MonteCarlo
     std::map<std::string, double> displacementParticles( double drMax );
     double testParticles();
 
+    void setFileName(std::string);
+
     //py::array_t<float> NVTrun( int nStep, double drMax );
     std::map<std::string, std::vector<double>> NVTrun( int nStep, double drMax, int interval = 100 );
+
+    std::string filename = "trajectory.xyz";
 
     private:
     int numberOfParticles;
@@ -45,6 +51,11 @@ class MonteCarlo
     double sr2Over = 1.77; // Overlap threshold ( pot > 100 )
     double rCut    = 2.5;
     double temperature;
+
+    std::mt19937 gen;
+    std::uniform_real_distribution<double> dist;
+
+    double RandNumber();
 
     bool isNeighbourList;
     linkList neighbourList;
