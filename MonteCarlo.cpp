@@ -50,6 +50,11 @@ void MonteCarlo::SetBox( const std::vector<double>& box )
         neighbourList.initList(numberOfParticles, rCut/this->box[0]);
 }
 
+void MonteCarlo::SetInitStep( const size_t n )
+{
+    nInit = n;
+}
+
 void MonteCarlo::InitPosition()
 {
     double volume  = double( box[0] * box[1] * box[2] );
@@ -426,6 +431,20 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
     pot.insert(std::pair<std::string, std::vector<double>>("moveRatios", std::vector<double>(nStep, 0)));
 
     PotentialType partial = calculateTotalPotential();
+
+    std::cout << "Initial Start" << std::endl;
+    for (size_t i = 0; i < nInit; i++)
+    {
+        auto results = displacementParticles(drMax);
+
+        double moveRatio = results["moves"] / numberOfParticles;
+        if ( moveRatio > 0.55 )
+            drMax *= 1.05;
+        else if (moveRatio < 0.45)
+                drMax *= 0.95;
+    }
+    std::cout << "Initial Done." << std::endl;
+
 
     for (size_t i = 0; i < nStep; i++)
     {

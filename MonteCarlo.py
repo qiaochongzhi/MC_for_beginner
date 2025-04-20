@@ -72,6 +72,10 @@ class MonteCarlo():
             if ("Filename" in system):
                 (self.mc).SetFileName( system["Filename"] )
 
+            # Set the initial step
+            if ("InitStep" in system):
+                (self.mc).SetInitStep( system["InitStep"] )
+
 
 
     @staticmethod

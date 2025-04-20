@@ -17,6 +17,7 @@ PYBIND11_MODULE(MonteCarlo, m)
       .def("TestParticles", &MonteCarlo::testParticles)
       .def("InitPosition", &MonteCarlo::InitPosition)
       .def("SetFileName", &MonteCarlo::setFileName)
+      .def("SetInitStep", &MonteCarlo::SetInitStep)
       .def("MCrun", &MonteCarlo::NVTrun)
       // .def("SetBox", &MonteCarlo::SetBox);
       .def("SetBox", static_cast<void (MonteCarlo::*)(const py::array_t<float> &)>(&MonteCarlo::SetBox));

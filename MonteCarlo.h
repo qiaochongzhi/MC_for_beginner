@@ -30,6 +30,7 @@ class MonteCarlo
     void SetBox( const py::array_t<float>& box );
     void SetBox( const std::vector<double>& box );
     void SetPosition( const py::array_t<float>& position );
+    void SetInitStep( const size_t n );
     void InitPosition();
     py::array_t<float> GetPosition();
     double GetTemperature() const { return temperature; }
@@ -51,6 +52,8 @@ class MonteCarlo
     double sr2Over = 1.77; // Overlap threshold ( pot > 100 )
     double rCut    = 2.5;
     double temperature;
+
+    size_t nInit = 1000;
 
     std::mt19937 gen;
     std::uniform_real_distribution<double> dist;
