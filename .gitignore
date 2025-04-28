@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.json
 *.xyz
+.conda
 
 # C extensions
 *.so

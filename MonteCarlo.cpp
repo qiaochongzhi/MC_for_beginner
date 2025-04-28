@@ -429,8 +429,7 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
     pot.insert(std::pair<std::string, std::vector<double>>("potential",  std::vector<double>(nStep, 0)));
     pot.insert(std::pair<std::string, std::vector<double>>("vir",        std::vector<double>(nStep, 0)));
     pot.insert(std::pair<std::string, std::vector<double>>("moveRatios", std::vector<double>(nStep, 0)));
-
-    PotentialType partial = calculateTotalPotential();
+    pot.insert(std::pair<std::string, std::vector<double>>("chemicalP",  std::vector<double>(nStep, 0)));
 
     std::cout << "Initial Start" << std::endl;
     for (size_t i = 0; i < nInit; i++)
@@ -446,14 +445,12 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
     std::cout << "Initial Done." << std::endl;
 
 
+    PotentialType partial = calculateTotalPotential();
     for (size_t i = 0; i < nStep; i++)
     {
         auto results = displacementParticles(drMax);
         if (i%1000==0)
            std::cout << i << std::endl;
-
-        // double pot1 = testParticles();
-        // pot1 = exp( - pot1 / temperature );
 
         double moveRatio = results["moves"] / numberOfParticles;
         if (moveRatio > 0.55)
@@ -473,6 +470,10 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
             pot["vir"][i]       = pot["vir"][i-1]       + results["vir"];
             pot["potential"][i] = pot["potential"][i-1] + results["pot"];
         }
+
+        double pot1 = testParticles();
+        pot1 = exp( - pot1 / temperature );
+        pot["chemicalP"][i] = pot1;
 
         // write trajectory to XYZ file
         if (i%interval == 0)

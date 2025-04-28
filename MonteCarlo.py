@@ -283,7 +283,7 @@ class MonteCarlo():
         time_end = time.time()
         print("Running Time: " + str(time_end-time_start) + " s")
 
-        pots = []
+        pots = results["chemicalP"]
 
         '''
         moveRatios = []
