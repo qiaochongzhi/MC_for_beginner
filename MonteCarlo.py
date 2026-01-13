@@ -18,6 +18,8 @@ class MonteCarlo():
     """
     This class is a Monte Carlo Simulation for Lennard-Jones fluids,
     in Canonical Ensemble.
+    Temperature: kb * T / epsilon
+    Size: sigma
     """
 
     def __init__(self, system):
@@ -42,6 +44,7 @@ class MonteCarlo():
         self.drMax = system["drMax"]
         self.vol   = np.prod(self.box)
 
+        # Temperature is equal to kb * T / epsilon
         self.temperature = system["temperature"]
 
         self.r = np.zeros([self.num, 3])
@@ -283,7 +286,11 @@ class MonteCarlo():
         time_end = time.time()
         print("Running Time: " + str(time_end-time_start) + " s")
 
-        pots = results["chemicalP"]
+        cp = results["chemicalP"]
+
+        chemP = np.mean( np.array( cp ) )
+        chemP = - np.log( chemP ) + 2 * self.Ulrc / self.temperature
+        # excess chemical potential, unit 1
 
         '''
         moveRatios = []
@@ -326,7 +333,8 @@ class MonteCarlo():
         total = self.mc.GetPotential()
         assert not total["overlap"], 'Overlap in final configuration'
 
-        return pressures, moveRatios, totalEnergy, pots, pots
+        return pressures, moveRatios, totalEnergy, cp, chemP
+        # excess chemical potential unit in 1
 
     @staticmethod
     def rdf( pos, box, n, dr = 0.02, totalStep = 1000 ):

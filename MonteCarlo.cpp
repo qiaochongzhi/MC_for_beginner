@@ -213,6 +213,7 @@ PotentialType MonteCarlo::calculateInteraction(const std::vector<double>& p1, co
     }
 
     return partial;
+    // The unit of partial is kb * T
 }
 
 PotentialType MonteCarlo::calculateTotalPotential()
@@ -449,8 +450,10 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
     for (size_t i = 0; i < nStep; i++)
     {
         auto results = displacementParticles(drMax);
+        /*
         if (i%1000==0)
            std::cout << i << std::endl;
+        */
 
         double moveRatio = results["moves"] / numberOfParticles;
         if (moveRatio > 0.55)
@@ -481,7 +484,7 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
             if ( i == 0)
                 writeXYZTrajectory(filename, i, false);
             else
-               writeXYZTrajectory(filename, i, true);
+                writeXYZTrajectory(filename, i, true);
         }
 
     }
