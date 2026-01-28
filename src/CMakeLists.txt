@@ -10,7 +10,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 set(PYTHON_EXECUTABLE "/Users/cz/anaconda3/bin/python3")
 set(PYTHON_INCLUDE_DIRECTORY "/Users/cz/anaconda3/include/python3.11")
 
-add_subdirectory(extern/pybind11)
+add_subdirectory(./extern/pybind11)
 
 # add_executable(TestMonteCarlo main.cpp MonteCarlo.cpp linkList.cpp)
 pybind11_add_module(MonteCarlo bind.cpp MonteCarlo.cpp linkList.cpp)

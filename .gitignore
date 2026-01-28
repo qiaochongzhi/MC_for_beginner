@@ -8,7 +8,52 @@ __pycache__/
 
 # C extensions
 *.so
+*.pyd
+*.dylib
 
+# Build directories
+build/
+src/build/
+
+# CMake build files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (generated)
+*.xyz
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Python packaging
+*.egg-info/
+dist/
+.eggs/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Original extern/ directory is ignored
 extern/
 
 # Distribution / packaging

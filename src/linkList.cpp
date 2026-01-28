@@ -1,12 +1,15 @@
 #include "linkList.h"
 
-void linkList::initList( const int numberOfParticles, const double rCutBox )
+void linkList::initList( const int numberOfParticles, const double rCutBox, bool verbose )
 {
     this->numberOfParticles = numberOfParticles;
     this->rCutBox           = rCutBox;
+    this->verbose           = verbose;
 
     this->sc = std::floor( 1.0 / rCutBox );
-    std::cout << "sc = " << sc << std::endl;
+    if (verbose) {
+        std::cout << "sc = " << sc << std::endl;
+    }
 
     // create the neighbour cell list, to store the cell index of each particle
     c.resize(numberOfParticles);
@@ -176,4 +179,43 @@ std::vector<int> linkList::getNeighbor(const int i, const std::vector<int>& ci, 
     }
 
     return neighbor;
+}
+
+// update the particle position in the List
+void linkList::update(int p_idx, const std::vector<double>& r_new)
+{
+    // update the c index of the particle
+    std::vector<int> ci_new = c_index(r_new);
+
+    // move the c index
+    moveInList(p_idx, ci_new);
+}
+
+// Get the neighbor particles from the position
+void linkList::getCandidatesFromPos(const std::vector<double>& r, std::vector<int>& results)
+{
+    // Compute the cell index for the given position r
+    std::vector<int> ci = c_index(r);
+    std::vector<int> cj(dim, 0);
+
+    // Traverse 27 neighbor cells
+    for (int k = 0; k < 27; k++)
+    {
+        // Calculate the neighboring cell indices, and PBC
+        for (int m = 0; m < dim; m++)
+        {
+            cj[m] = ci[m] + neighborBox[k][m];
+            if (cj[m] < 0)   cj[m] += sc;
+            if (cj[m] >= sc) cj[m] -= sc;
+        }
+
+        // Traverse the linked list in the neighboring cell
+        int j = head[cj[0]][cj[1]][cj[2]];
+
+        while (j != -1)
+        {
+            results.push_back(j);
+            j = list[j];
+        }
+    }
 }

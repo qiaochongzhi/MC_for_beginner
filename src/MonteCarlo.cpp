@@ -3,13 +3,14 @@
 //#define RandNumber() ( rand() / double( RAND_MAX ) )
 #define INFINT 1.e10
 
-MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbourList)
+MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbourList, bool verbose)
 {
     this->numberOfParticles = num;
     this->dim               = dim;
     this->temperature       = t;
     this->rCut              = rCut;
     this->isNeighbourList   = isNeighbourList;
+    this->verbose           = verbose;
 
     position.resize(num);
 
@@ -19,6 +20,39 @@ MonteCarlo::MonteCarlo(int num, int dim, double t, double rCut, bool isNeighbour
     gen = std::mt19937(std::random_device{}()); // init the random seed
     dist = std::uniform_real_distribution<double>(0.0, 1.0);
 
+}
+
+void MonteCarlo::SetVerbose(bool v)
+{
+    verbose = v;
+    neighbourList.setVerbose(v);
+}
+
+void MonteCarlo::SetMethod(std::string method)
+{
+    if (method == "GCA")
+    {
+        m_Method = SimulationMethod::GCA;
+
+        m_InCluster.resize(numberOfParticles, false);
+        m_IsCandidate.resize(numberOfParticles, false);
+        m_Stack.reserve(numberOfParticles);
+        m_CandidateList.reserve(numberOfParticles);
+
+        m_BoundaryPotAcc.resize(numberOfParticles, 0.0);
+        m_BoundaryVirAcc.resize(numberOfParticles, 0.0);
+
+        if (verbose) {
+            std::cout << "Method set to: GCA" << std::endl;
+        }
+    }
+    else
+    {
+        m_Method = SimulationMethod::METROPOLIS;
+        if (verbose) {
+            std::cout << "Method set to: Metropolis" << std::endl;
+        }
+    }
 }
 
 void MonteCarlo::setFileName(std::string s)
@@ -38,7 +72,7 @@ void MonteCarlo::SetBox( const py::array_t<float>& box )
         this->box[i] = r(i);
 
     if ( isNeighbourList )
-        neighbourList.initList(numberOfParticles, rCut/this->box[0]);
+        neighbourList.initList(numberOfParticles, rCut/this->box[0], verbose);
 }
 
 void MonteCarlo::SetBox( const std::vector<double>& box )
@@ -47,7 +81,7 @@ void MonteCarlo::SetBox( const std::vector<double>& box )
         this->box[i] = box[i];
 
     if ( isNeighbourList )
-        neighbourList.initList(numberOfParticles, rCut/this->box[0]);
+        neighbourList.initList(numberOfParticles, rCut/this->box[0], verbose);
 }
 
 void MonteCarlo::SetInitStep( const size_t n )
@@ -78,7 +112,9 @@ void MonteCarlo::InitPosition()
     };
 
     // print value of cells
-    std::cout << "cells: " << cells[0] << " " << cells[1] << " " << cells[2] << std::endl;
+    if (verbose) {
+        std::cout << "cells: " << cells[0] << " " << cells[1] << " " << cells[2] << std::endl;
+    }
 
     int n = 0; // index of particles
     bool breakFlag = false;
@@ -404,6 +440,137 @@ bool MonteCarlo::metropolis( double delta )
         return false;
 }
 
+// ========== GCA methods ========== //
+
+void MonteCarlo::GetLJDiff(const std::vector<double>& r_old, const std::vector<double>& r_new, const std::vector<double>& r_j, double& d_pot, double& d_vir)
+{
+    double rCutSq = rCut * rCut;
+
+    // lambda: Calculate the single point energy
+    auto calc = [&](const std::vector<double>& pos_i, const std::vector<double>& pos_j) -> std::pair<double, double>
+    {
+        double r2 = 0.0;
+        for ( size_t k = 0; k < dim; k++)
+        {
+            double diff = pos_i[k] - pos_j[k];
+            diff -= round(diff); // PBC [-0.5, 0.5]
+            diff *= box[k];
+            r2 += diff * diff;
+        }
+
+        if (r2 >= rCutSq) return {0.0, 0.0};
+        if (r2 < 1e-10) r2 = 1e-10;
+
+        double inv2 = 1.0 / r2;
+        double inv6 = inv2 * inv2 * inv2;
+        double inv12 = inv6 * inv6;
+
+        // return the potential and Virial
+        return {4.0 * (inv12 - inv6), 8.0 * (2.0 * inv12 - inv6)};
+    };
+
+    auto [p1, v1] = calc(r_old, r_j);
+    auto [p2, v2] = calc(r_new, r_j);
+    d_pot = p2 - p1;
+    d_vir = v2 - v1;
+}
+
+MonteCarlo::GCAResult MonteCarlo::StepGCA()
+{
+    // Select Pivot and Seed
+    std::vector<double> pivot(dim);
+    for (int k = 0; k < dim; k++) pivot[k] = RandNumber() - 0.5;
+
+    int seed = (int)(RandNumber() * numberOfParticles);
+    if (seed >= numberOfParticles)
+        seed = numberOfParticles - 1;
+
+    // Reset the state of the system
+    std::fill(m_InCluster.begin(), m_InCluster.end(), false);
+    std::fill(m_BoundaryPotAcc.begin(), m_BoundaryPotAcc.end(), 0.0);
+    std::fill(m_BoundaryVirAcc.begin(), m_BoundaryVirAcc.end(), 0.0);
+    m_Stack.clear();
+
+    m_Stack.push_back(seed);
+    m_InCluster[seed] = true;
+
+    double totalDPot = 0.0;
+    double totalDVir = 0.0;
+    int cSize = 0;
+
+    // Cluster growth
+    while (!m_Stack.empty())
+    {
+        int i = m_Stack.back();
+        m_Stack.pop_back();
+        cSize++;
+
+        std::vector<double> r_old = position[i];
+        std::vector<double> r_new(dim);
+
+        // reverse cordinate
+        for (int k = 0; k < dim; k++)
+        {
+            double val = 2.0 * pivot[k] - r_old[k];
+            val -= round(val); // PBC
+            r_new[k] = val;
+            position[i][k] = val; // Renewal of position
+        }
+
+        // Renew the position, by using linkList (O(1))
+        neighbourList.update(i, r_new);
+
+        // Get the neighbors (from old and new position)
+        m_CandidateList.clear();
+        neighbourList.getCandidatesFromPos(r_old, m_CandidateList);
+        neighbourList.getCandidatesFromPos(r_new, m_CandidateList);
+
+        for(int j : m_CandidateList)
+        {
+            if (i == j) continue;
+            if (m_InCluster[j]) continue;
+            if (m_IsCandidate[j]) continue;
+
+            m_IsCandidate[j] = true;
+
+            double dp, dv;
+            GetLJDiff(r_old, r_new, position[j], dp, dv);
+
+            bool join = false;
+            if (dp > 0)
+            {
+                double prob = 1.0 - std::exp(-dp / temperature);
+                if (prob > RandNumber()) join = true;
+            }
+
+            if (join)
+            {
+                totalDPot -= m_BoundaryPotAcc[j];
+                totalDVir -= m_BoundaryVirAcc[j];
+                m_BoundaryPotAcc[j] = 0.0;
+                m_BoundaryVirAcc[j] = 0.0;
+
+                m_InCluster[j] = true;
+                m_Stack.push_back(j);
+            }
+            else
+            {
+                totalDPot += dp;
+                totalDVir += dv;
+                m_BoundaryPotAcc[j] += dp;
+                m_BoundaryVirAcc[j] += dv;
+            }
+        }
+
+        // Reset the state of m_IsCandidate: set all positions to false.
+        for (int j : m_CandidateList) m_IsCandidate[j] = false;
+    }
+
+    return {totalDPot, totalDVir, cSize};
+}
+
+// =============================================== //
+
 double MonteCarlo::testParticles()
 {
     PotentialType partial;
@@ -432,36 +599,73 @@ std::map<std::string, std::vector<double>> MonteCarlo::NVTrun( int nStep, double
     pot.insert(std::pair<std::string, std::vector<double>>("moveRatios", std::vector<double>(nStep, 0)));
     pot.insert(std::pair<std::string, std::vector<double>>("chemicalP",  std::vector<double>(nStep, 0)));
 
-    std::cout << "Initial Start" << std::endl;
+    if (verbose) {
+        std::cout << "Initial Start" << std::endl;
+    }
     for (size_t i = 0; i < nInit; i++)
     {
-        auto results = displacementParticles(drMax);
+        if (m_Method == SimulationMethod::METROPOLIS)
+        {
+            auto results = displacementParticles(drMax);
 
-        double moveRatio = results["moves"] / numberOfParticles;
-        if ( moveRatio > 0.55 )
-            drMax *= 1.05;
-        else if (moveRatio < 0.45)
-                drMax *= 0.95;
+            double moveRatio = results["moves"] / numberOfParticles;
+            if ( moveRatio > 0.55 )
+                drMax *= 1.05;
+            else if (moveRatio < 0.45)
+                    drMax *= 0.95;
+        }
+        else if (m_Method == SimulationMethod::GCA)
+        {
+            GCAResult res = StepGCA();
+        }
+        else
+        {
+            std::cerr << "Error: Simulation method not found or not implemented." << std::endl;
+            exit(-1);
+        }
     }
-    std::cout << "Initial Done." << std::endl;
+    if (verbose) {
+        std::cout << "Initial Done." << std::endl;
+    }
 
 
     PotentialType partial = calculateTotalPotential();
     for (size_t i = 0; i < nStep; i++)
     {
-        auto results = displacementParticles(drMax);
-        /*
-        if (i%1000==0)
-           std::cout << i << std::endl;
-        */
 
-        double moveRatio = results["moves"] / numberOfParticles;
-        if (moveRatio > 0.55)
-            drMax *= 1.05;
-        else if (moveRatio < 0.45)
-            drMax *= 0.95;
+        std::map<std::string, double> results;
 
-        pot["moveRatios"][i] = moveRatio;
+        if (m_Method == SimulationMethod::METROPOLIS)
+        {
+            results = displacementParticles(drMax);
+            /*
+            if (i%1000==0)
+                std::cout << i << std::endl;
+            */
+
+            double moveRatio = results["moves"] / numberOfParticles;
+            if (moveRatio > 0.55)
+                drMax *= 1.05;
+            else if (moveRatio < 0.45)
+                drMax *= 0.95;
+
+            pot["moveRatios"][i] = moveRatio;
+
+        }
+        else if (m_Method == SimulationMethod::GCA)
+        {
+            GCAResult res = StepGCA();
+            results["pot"] = res.d_pot;
+            results["vir"] = res.d_vir;
+            results["moves"] = res.clusterSize;
+
+            pot["moveRatios"][i] = res.clusterSize;
+        }
+        else
+        {
+                std::cerr << "Error: Simulation method not found or not implemented." << std::endl;
+                exit(-1);
+        }
 
         if ( i == 0)
         {
